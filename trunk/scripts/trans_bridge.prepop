@@ -1,0 +1,59 @@
+#!/bin/bash
+
+#pre-populated variables
+SWMAC=f0:ad:4e:00:35:82
+COMPMAC=c0:c1:c0:76:35:7c
+COMIP=192.168.0.10
+GWNET=192.168.0.0/24
+DEFGW=192.168.0.15
+BRINT=br0
+SWINT=eth0
+COMPINT=eth1
+BRIP=169.254.66.66
+DPORT=9876
+RANGE=61000-62000
+
+#build the bridge
+brctl addbr $BRINT
+brctl addif $BRINT $COMPINT
+brctl addif $BRINT $SWINT
+
+#bring up both sides of the bridge
+ifconfig $COMPINT 0.0.0.0 up promisc
+ifconfig $SWINT 0.0.0.0 up promisc
+
+#start dark
+arptables -A OUTPUT -j DROP
+iptables -A OUTPUT -j DROP
+
+#swap the mac address to the switch side mac, so we always know which mac the bridge is
+macchanger -m $SWMAC $BRINT
+
+# bring up the bridge with the non-routable IP
+ifconfig $BRINT $BRIP up promisc
+
+
+#add the network info
+#add the default route
+route  add -net $GWNET dev $BRINT
+route add default gw $DEFGW
+
+# use ebtables to source NAT the $COMPMAC for traffic leaving the device
+# from the bridge mac address
+ebtables -t nat -A POSTROUTING -s $SWMAC -o $SWINT -j snat --to-src $COMPMAC
+ebtables -t nat -A POSTROUTING -s $SWMAC -o $BRINT -j snat --to-src $COMPMAC
+
+#use DNAT to map $DPORT to $brip:22
+iptables -t nat -A PREROUTING -i br0 -d $COMIP -p tcp --dport $DPORT -j DNAT --to $BRIP:22
+
+# set up the source nat rules for tcp/udp/icmp
+iptables -t nat -A POSTROUTING -o $BRINT -s $BRIP -p tcp -j SNAT --to $COMIP:$RANGE
+iptables -t nat -A POSTROUTING -o $BRINT -s $BRIP -p udp -j SNAT --to $COMIP:$RANGE
+iptables -t nat -A POSTROUTING -o $BRINT -s $BRIP -p icmp -j SNAT --to $COMIP
+
+#start sshd
+/etc/init.d/ssh start
+
+#return from radio silence
+arptables -D OUTPUT -j DROP
+iptables -D OUTPUT -j DROP

