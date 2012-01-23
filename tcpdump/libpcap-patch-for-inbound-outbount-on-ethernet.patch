@@ -1,0 +1,25 @@
+diff -crB orig/libpcap-1.1.1/gencode.c libpcap-1.1.1/gencode.c
+*** orig/libpcap-1.1.1/gencode.c        Thu Mar 11 20:56:54 2010
+--- libpcap-1.1.1/gencode.c     Wed Apr  6 19:33:42 2011
+***************
+*** 7410,7416 ****
+--- 7410,7427 ----
+                          gen_loadi(0),
+                          dir);
+                break;
++        case DLT_EN10MB:
++                /* ethernet flags (including direction) are stored
++                 * the byte after the 3-byte magic number */
++                if (dir) {
++                        /* match outgoing packets */
++                        b0 = gen_mcmp(OR_LINK, 3, BPF_B, 1, 0x01);
++                } else {
++                        /* incoming packets */
++                        b0 = gen_mcmp(OR_LINK, 3, BPF_B, 0, 0x01);
++                }
+  
++                break; 
+        case DLT_IPNET:
+                if (dir) {
+                        /* match outgoing packets */
+
